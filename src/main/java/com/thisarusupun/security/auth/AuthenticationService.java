@@ -2,6 +2,9 @@ package com.thisarusupun.security.auth;
 
 import com.thisarusupun.security.UserRepository;
 import com.thisarusupun.security.config.JwtService;
+import com.thisarusupun.security.token.Token;
+import com.thisarusupun.security.token.TokenRepository;
+import com.thisarusupun.security.token.TokenType;
 import com.thisarusupun.security.user.Role;
 import com.thisarusupun.security.user.User;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +18,8 @@ import org.springframework.stereotype.Service;
 public class AuthenticationService {
 
     private final UserRepository userRepository;
+    private final TokenRepository tokenRepository;
+
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
@@ -27,9 +32,11 @@ public class AuthenticationService {
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(Role.USER)
                 .build();
-        userRepository.save(user);
-
+        var savedUser = userRepository.save(user);
         var jwtToken = jwtService.generateToken(user);
+
+        revokeAllUserTokens(user);
+        saveUserToken(savedUser, jwtToken);
 
         return AuthenticationResponse.builder()
                 .token(jwtToken)
@@ -48,8 +55,35 @@ public class AuthenticationService {
 
         var jwtToken = jwtService.generateToken(user);
 
+        revokeAllUserTokens(user);
+        saveUserToken(user,jwtToken);
+
         return AuthenticationResponse.builder()
                 .token(jwtToken)
                 .build();
+    }
+
+    private void saveUserToken(User user, String jwtToken) {
+        var token = Token.builder()
+                .user(user)
+                .token(jwtToken)
+                .tokenType(TokenType.BEARER)
+                .expired(false)
+                .revoked(false)
+                .build();
+
+        tokenRepository.save(token);
+    }
+
+    private void revokeAllUserTokens(User user){
+        var validUserTokens = tokenRepository.findAllValidTokensByUser(user.getId());
+        if (validUserTokens.isEmpty()){
+            return;
+        }
+        validUserTokens.forEach(t ->{
+            t.setExpired(true);
+            t.setRevoked(true);
+        });
+        tokenRepository.saveAll(validUserTokens);
     }
 }
